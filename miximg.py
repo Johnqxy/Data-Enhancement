@@ -5,10 +5,9 @@ import random
 import numpy as np
 from tkinter import *
 from tkinter import filedialog
-from xml.etree import ElementTree as ET
 import natsort
 import json
-
+import copy
 
 class MixImg():
     def __init__(self):
@@ -38,106 +37,7 @@ class MixImg():
             num = num1 * rate
         return num, num1
 
-    def create_annotation(self, xn):
-        global annotation
-        tree = ET.ElementTree()
-        tree.parse(xn)
-        annotation = tree.getroot()
-
     # 遍历xml里面每个object的值如果相同就不插入
-    def traverse_object(self, AnotPath):
-        tree = ET.ElementTree(file=AnotPath)
-        root = tree.getroot()
-        ObjectSet = root.findall('object')
-        for Object in ObjectSet:
-            ObjName = Object.find('name').text
-            BndBox = Object.find('bndbox')
-            x1 = int(BndBox.find('xmin').text)
-            y1 = int(BndBox.find('ymin').text)
-            x2 = int(BndBox.find('xmax').text)
-            y2 = int(BndBox.find('ymax').text)
-            self.objectList.append([x1, y1, x2, y2, ObjName])
-
-    # 定义一个创建一级分支object的函数
-    def create_object(self, root, objl):  # 参数依次，树根，xmin，ymin，xmax，ymax
-        # 创建一级分支object
-        _object = ET.SubElement(root, 'object')
-        # 创建二级分支
-        name = ET.SubElement(_object, 'name')
-        # print(obj_name)
-        name.text = str(objl[4])
-        pose = ET.SubElement(_object, 'pose')
-        pose.text = 'Unspecified'
-        truncated = ET.SubElement(_object, 'truncated')
-        truncated.text = '0'
-        difficult = ET.SubElement(_object, 'difficult')
-        difficult.text = '0'
-        # 创建bndbox
-        bndbox = ET.SubElement(_object, 'bndbox')
-        xmin = ET.SubElement(bndbox, 'xmin')
-        xmin.text = '%s' % objl[0]
-        ymin = ET.SubElement(bndbox, 'ymin')
-        ymin.text = '%s' % objl[1]
-        xmax = ET.SubElement(bndbox, 'xmax')
-        xmax.text = '%s' % objl[2]
-        ymax = ET.SubElement(bndbox, 'ymax')
-        ymax.text = '%s' % objl[3]
-
-    # 创建xml文件的函数
-    def create_tree(self, image_name, h, w, imgdir):
-        global annotation
-        # 创建树根annotation
-        annotation = ET.Element('annotation')
-        # 创建一级分支folder
-        folder = ET.SubElement(annotation, 'folder')
-        # 添加folder标签内容
-        folder.text = (imgdir)
-
-        # 创建一级分支filename
-        filename = ET.SubElement(annotation, 'filename')
-        filename.text = image_name
-
-        # 创建一级分支path
-        path = ET.SubElement(annotation, 'path')
-
-        # path.text = getcwd() + '\{}\{}'.format(imgdir, image_name)  # 用于返回当前工作目录
-        path.text = '{}'.format(imgdir)  # 用于返回当前工作目录
-
-        # 创建一级分支source
-        source = ET.SubElement(annotation, 'source')
-        # 创建source下的二级分支database
-        database = ET.SubElement(source, 'database')
-        database.text = 'Unknown'
-
-        # 创建一级分支size
-        size = ET.SubElement(annotation, 'size')
-        # 创建size下的二级分支图像的宽、高及depth
-        width = ET.SubElement(size, 'width')
-        width.text = str(w)
-        height = ET.SubElement(size, 'height')
-        height.text = str(h)
-        depth = ET.SubElement(size, 'depth')
-        depth.text = '3'
-
-        # 创建一级分支segmented
-        segmented = ET.SubElement(annotation, 'segmented')
-        segmented.text = '0'
-
-    def pretty_xml(self, element, indent, newline, level=0):  # elemnt为传进来的Elment类，参数indent用于缩进，newline用于换行
-        if element:  # 判断element是否有子元素
-            if (element.text is None) or element.text.isspace():  # 如果element的text没有内容
-                element.text = newline + indent * (level + 1)
-            else:
-                element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * (level + 1)
-                # else:  # 此处两行如果把注释去掉，Element的text也会另起一行
-                # element.text = newline + indent * (level + 1) + element.text.strip() + newline + indent * level
-        temp = list(element)  # 将element转成list
-        for subelement in temp:
-            if temp.index(subelement) < (len(temp) - 1):  # 如果不是list的最后一个元素，说明下一个行是同级别元素的起始，缩进应一致
-                subelement.tail = newline + indent * (level + 1)
-            else:  # 如果是list的最后一个元素， 说明下一行是母元素的结束，缩进应该少一个
-                subelement.tail = newline + indent * level
-            self.pretty_xml(subelement, indent, newline, level=level + 1)  # 对子元素进行递归操作
 
     def rename(self):
         for file_name in natsort.natsorted(glob.glob(os.path.join(self.rename_dir, "*"))):
@@ -158,13 +58,16 @@ class MixImg():
             self.first_index = int(self.first_index) + 1
         self.first_index = None
 
-    def make_annotation(self, iw, igauss, irate, mixdir, n, index, label):
+    def make_annotation(self, iw, igauss, irate, mixdir, n, label, mask, raw_point):
         IMAGES_LIST = os.listdir(mixdir)
+
         # print(IMAGES_LIST)
         for bg_filename in natsort.natsorted(IMAGES_LIST):
             n += 1
+            point = copy.deepcopy(raw_point)
             if bg_filename.endswith(('.jpg', '.png', '.jpeg', '.bmp')):
                 bg_filename = os.path.join(mixdir, bg_filename)
+                relative_imgdir = bg_filename.split('/')[-1]
                 save_filename = self.save_dir + '/'
                 # save_annoname=cut_img_filename+"mix" + os.path.splitext(bg_filename)[0].split('\\')[-1]
                 save_annoname = "mix" + str(n)
@@ -177,88 +80,98 @@ class MixImg():
                 img_h = int(img_w * irate)
                 img_h = int(self.re_imsize(bg_h, img_h))
                 img = cv2.resize(igauss, (img_w, img_h))
+                mask = cv2.resize(mask, (img_w, img_h))
+
                 rnd = [random.randint(0, bg_h - img_h), random.randint(0, bg_w - img_w)]
+
                 object_information = [rnd[1], rnd[0], img.shape[1] + rnd[1], img.shape[0] + rnd[0],
-                                      self.predefined_classes[index]]  # x1,y1,x2,y2,name
-                if object_information[4] != '-1':
-                    json_name = ('{}/{}.json'.format(self.annotation_dir, save_annoname))
-                    json_dict = {'shapes': [
-                        {'label': label,
-                         'points': [[rnd[1], rnd[0]], [rnd[1] + img.shape[1], rnd[0]], [rnd[1], rnd[0] + img.shape[0]],
-                                    [img.shape[1] + rnd[1], img.shape[0] + rnd[0]]]}]}
+                                      ]  # x1,y1,x2,y2,name
+                for i in range(len(point)):
+                    point[i][0] = point[i][0] + rnd[1]
+                    point[i][1] = point[i][1] + rnd[0]
+                # print(point)
+                json_name = ('{}/{}.json'.format(self.annotation_dir, save_annoname))
+
+                if (os.path.exists(json_name)):
+                    json_dict = {'label': label, 'points': point,
+                                 "group_id": NONE, 'shape_type': 'polygen', "flags": {}}
+                    with open('{}/{}.json'.format(self.annotation_dir, save_annoname), 'w') as fs:
+                        data = json.load(fs)
+                        data['shapes'].append(json_dict)
+                        fs.close()
+
+
+                else:
+                    json_dict = {'shapes': [{'label': label, 'points': point,
+                                             "group_id": NONE, 'shape_type': 'polygen', "flags": {}}],
+                                 "imagePath": (save_filename + '.jpg').split('/')[-1]
+                        , "imageHeight": bg_h, "imageWidth": bg_w}
                     with open('{}/{}.json'.format(self.annotation_dir, save_annoname), 'w') as fs:
                         json.dump(json_dict, fs)
-                xml_name = ('{}/{}.xml'.format(self.annotation_dir, save_annoname))
-                if (os.path.exists(xml_name)):
-                    self.create_annotation(xml_name)
-                    self.traverse_object(xml_name)
-                else:
-                    self.create_tree(save_annoname + '.jpg', bg_h, bg_w, mixdir)
-                if (self.objectList.count(object_information) == 0):
-                    self.create_object(annotation, object_information)
-                self.objectList = []
-                tree = ET.ElementTree(annotation)
-                root = tree.getroot()
-                self.pretty_xml(root, '\t', '\n')
-                tree.write(xml_name, encoding='utf-8')
-            # print(iname + "标签已保存")
-            img_mask = 255 * np.ones(img.shape[:2], img.dtype)
-            bg[object_information[1]:object_information[3],
-            object_information[0]:object_information[2]] = cv2.bitwise_and(img, img, mask=img_mask)
-            cv2.imwrite(save_filename + '.jpg', bg)
-            print("图片已保存到" + save_filename)
-            # self.handle_flag=True
-            # print(img_filename+"标签已保存")
+                        fs.close()
+
+                # print(iname + "标签已保存")
+
+                mask_inv = cv2.bitwise_not(mask)
+                bg[object_information[1]:object_information[3],
+                object_information[0]:object_information[2]] = cv2.bitwise_and(
+                    bg[object_information[1]:object_information[3],
+                    object_information[0]:object_information[2]], bg[object_information[1]:object_information[3],
+                                                                  object_information[0]:object_information[2]],
+                    mask=mask_inv)
+
+                fg = cv2.bitwise_and(img, img, mask=mask)
+
+                bg[object_information[1]:object_information[3],
+                object_information[0]:object_information[2]] = cv2.add(bg[object_information[1]:object_information[3],
+                                                                       object_information[0]:object_information[2]], fg)
+                cv2.imwrite(save_filename + '.jpg', bg)
+                print("图片已保存到" + save_filename)
+                object_information.clear()
+                point.clear()
+        # self.handle_flag=True
+        # print(img_filename+"标签已保存")
 
     def mix(self):
-        imgdir_filename_last = ''
         x = []
         y = []
-        with open(self.detect_class, "r") as f:  # 打开文件
-            for line in f.readlines():
-                line = line.strip('\n')  # 去掉列表中每一个元素的换行符
-                self.predefined_classes.append(line)
-        self.handle_flag = False
-        # for i in range(1, int(self.predefined_classes[0]) + 1):
-        label_index = -1
-
+        relative_point = []
         for imgdir_filename in natsort.natsorted(glob.glob(os.path.join(self.img_dir, "*"))):
             imgdir_filename, type = imgdir_filename.split('.')
-            if imgdir_filename == imgdir_filename_last:
+            if type == 'json':
                 continue
+            original_img = cv2.imread(imgdir_filename + '.' + type)
             with open(imgdir_filename + '.json', 'r') as fp:
                 js = json.load(fp)
-                points = js['shapes'][0]['points']
-                label = js['shapes'][0]['label']
-
-            for i in points:
-                x.append(i[0])
-                y.append(i[1])
-            max_x = int(max(x))
-            min_x = int(min(x))
-            max_y = int(max(y))
-            min_y = int(min(y))
-            label_index += 1
-            bg_index = 0
-
-            original_img = cv2.imread(str(imgdir_filename + '.' + type))
-
-            original_img = original_img[min_y:max_y, min_x:max_x]
-            cv2.imshow('aaa', original_img)
-
-            # cut_img_filename=os.path.splitext(img_filename)[0].split('\\')[-1]
-            img_h, img_w = original_img.shape[:2]
-            img_gauss = cv2.GaussianBlur(original_img, (3, 3), 0)
-            hw_rate = img_h / img_w
-            # file_tail = os.path.splitext(img_filename)[1]
-            if (self.handle_flag):
-                self.make_annotation(img_w, img_gauss, hw_rate, self.save_dir, bg_index, label_index, label)
-            else:
-                self.make_annotation(img_w, img_gauss, hw_rate, self.bg_dir, bg_index, label_index, label)
-            self.handle_flag = True
-
-            imgdir_filename_last = imgdir_filename
-        self.predefined_classes = []
+                for i in range(0, len(js['shapes'])):
+                    points = js['shapes'][i]['points']
+                    label = js['shapes'][i]['label']
+                    for point in points:
+                        x.append(point[0])
+                        y.append(point[1])
+                        max_x = int(max(x))
+                        min_x = int(min(x))
+                        max_y = int(max(y))
+                        min_y = int(min(y))
+                    for point in points:
+                        relative_point.append([point[0] - min_x, point[1] - min_y])
+                    bg_index = 0
+                    min_rect_img = original_img[min_y:max_y, min_x:max_x]
+                    mask = np.zeros(min_rect_img.shape, min_rect_img.dtype)
+                    cv2.fillPoly(mask, [np.array(relative_point, dtype=np.int32)], (255, 255, 255))
+                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                    img_h, img_w = min_rect_img.shape[:2]
+                    hw_rate = img_h / img_w
+                    if (self.handle_flag):
+                        self.make_annotation(img_w, min_rect_img, hw_rate, self.save_dir, bg_index, label, mask,
+                                             relative_point)
+                    else:
+                        self.make_annotation(img_w, min_rect_img, hw_rate, self.bg_dir, bg_index, label, mask,
+                                             relative_point)
+                    self.handle_flag = True
+                    x.clear()
+                    y.clear()
+                    relative_point.clear()
 
     def client(self):
         def creatWindow():
@@ -285,6 +198,8 @@ class MixImg():
         def test03():
             self.save_dir = r""
             self.save_dir += filedialog.askdirectory()
+            self.annotation_dir = r""
+            self.annotation_dir = self.save_dir
             creatWindow()
 
         def test04():
@@ -318,12 +233,12 @@ class MixImg():
         def window():
             self.root_window = Tk()
             self.root_window.title("")
-            screenWidth = self.root_window.winfo_screenwidth()  # 获取显示区域的宽度
-            screenHeight = self.root_window.winfo_screenheight()  # 获取显示区域的高度
-            tk_width = 500  # 设定窗口宽度
-            tk_height = 400  # 设定窗口高度
-            tk_left = int((screenWidth - tk_width) / 2)
-            tk_top = int((screenHeight - tk_width) / 2)
+            screen_width = self.root_window.winfo_screenwidth()  # 获取显示区域的宽度
+            screen_height = self.root_window.winfo_screenheight()  # 获取显示区域的高度
+            tk_width = 800  # 设定窗口宽度
+            tk_height = 800  # 设定窗口高度
+            tk_left = int((screen_width - tk_width) / 2)
+            tk_top = int((screen_height - tk_width) / 2)
             self.root_window.geometry('%dx%d+%d+%d' % (tk_width, tk_height, tk_left, tk_top))
             self.root_window.minsize(tk_width, tk_height)  # 最小尺寸
             self.root_window.maxsize(tk_width, tk_height)  # 最大尺寸
